@@ -14,6 +14,33 @@ export default function Products() {
   const [category, setCategory] = useState('');
   const [sort, setSort] = useState('');
 
+  const [wishlistIds, setWishlistIds] = useState(new Set());
+
+  const fetchWishlist = useCallback(async () => {
+    try {
+      const res = await api.get('/wishlist');
+      if (res.data?.wishlist) {
+        const ids = new Set(res.data.wishlist.map((item) => (typeof item === 'object' ? item._id : item)));
+        setWishlistIds(ids);
+      }
+    } catch (err) {
+      // Unauthenticated or network issue, leave empty set
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWishlist();
+  }, [fetchWishlist]);
+
+  const handleWishlistChange = (productId, isAdded) => {
+    setWishlistIds((prev) => {
+      const next = new Set(prev);
+      if (isAdded) next.add(productId);
+      else next.delete(productId);
+      return next;
+    });
+  };
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -168,7 +195,12 @@ export default function Products() {
         {!loading && !error && products.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {products.map((product) => (
-              <ProductCard key={product._id} product={product} />
+              <ProductCard
+                key={product._id}
+                product={product}
+                initialWishlisted={wishlistIds.has(product._id)}
+                onWishlistChange={handleWishlistChange}
+              />
             ))}
           </div>
         )}

@@ -36,6 +36,9 @@ export default function Login({ setUser }) {
     try {
       const response = await api.post('/customers/login', credentials);
       if (response.data?.success || response.status === 200) {
+        if (response.data?.token) {
+          localStorage.setItem('shopkart_token', response.data.token);
+        }
         // Fetch logged in user profile immediately to sync app state
         try {
           const profileRes = await api.get('/customers/me');

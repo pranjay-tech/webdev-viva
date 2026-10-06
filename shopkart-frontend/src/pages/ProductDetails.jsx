@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useCart } from '../context/CartContext';
 
 export default function ProductDetails() {
   const { id } = useParams();
@@ -12,11 +13,15 @@ export default function ProductDetails() {
   const [error, setError] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [addedNotice, setAddedNotice] = useState(false);
+  const { addToCart, getItemQuantity, itemLoaders } = useCart();
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [wishlistFeedback, setWishlistFeedback] = useState('');
 
   useEffect(() => {
     let isMounted = true;
 
-    const fetchProduct = async () => {
+    const fetchProductAndWishlist = async () => {
       setLoading(true);
       setError('');
       try {
@@ -27,6 +32,19 @@ export default function ProductDetails() {
           } else {
             setProduct(response.data);
           }
+        }
+
+        // Check if item is in wishlist
+        try {
+          const wRes = await api.get('/wishlist');
+          if (isMounted && wRes.data?.wishlist) {
+            const hasIt = wRes.data.wishlist.some(
+              (item) => (typeof item === 'object' ? item._id : item) === id
+            );
+            setIsWishlisted(hasIt);
+          }
+        } catch (wErr) {
+          // not logged in or wishlist error
         }
       } catch (err) {
         if (isMounted) {
@@ -44,18 +62,55 @@ export default function ProductDetails() {
       }
     };
 
-    fetchProduct();
+    fetchProductAndWishlist();
 
     return () => {
       isMounted = false;
     };
   }, [id]);
 
-  const handleAddToCart = () => {
-    setAddedNotice(true);
-    setTimeout(() => {
+  const handleWishlistToggle = async () => {
+    if (wishlistLoading) return;
+    setWishlistLoading(true);
+    setWishlistFeedback('');
+
+    try {
+      if (isWishlisted) {
+        await api.delete(`/wishlist/${id}`);
+        setIsWishlisted(false);
+        setWishlistFeedback('Removed from Wishlist');
+        window.dispatchEvent(new CustomEvent('wishlist-updated', { detail: { productId: id, added: false } }));
+      } else {
+        await api.post(`/wishlist/${id}`);
+        setIsWishlisted(true);
+        setWishlistFeedback('♥ Added to Wishlist');
+        window.dispatchEvent(new CustomEvent('wishlist-updated', { detail: { productId: id, added: true } }));
+      }
+    } catch (err) {
+      if (err.response?.status === 401) {
+        navigate('/login', { state: { message: 'Please log in to manage your wishlist' } });
+        return;
+      }
+      setWishlistFeedback(err.response?.data?.message || 'Failed to update wishlist');
+    } finally {
+      setWishlistLoading(false);
+      setTimeout(() => setWishlistFeedback(''), 3000);
+    }
+  };
+
+  const handleAddToCart = async () => {
+    if (itemLoaders[id] === 'adding') return;
+    const res = await addToCart(id);
+    if (res.success) {
+      setAddedNotice(true);
+      setTimeout(() => setAddedNotice(false), 3000);
+    } else if (res.status === 401) {
+      navigate('/login', { state: { message: 'Please log in to add items to cart' } });
+    } else {
       setAddedNotice(false);
-    }, 3000);
+      setWishlistFeedback(res.message || 'Could not add to cart');
+      setTimeout(() => setWishlistFeedback(''), 4000);
+    }
   };
 
   if (loading) {
@@ -208,19 +263,80 @@ export default function ProductDetails() {
                   </button>
                 </div>
 
-                {/* Add to Cart Button */}
+                {/* Add to Cart Button — wired to CartContext */}
                 <button
                   onClick={handleAddToCart}
-                  disabled={isOutOfStock}
-                  className="flex-1 py-3.5 px-6 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  disabled={isOutOfStock || itemLoaders[id] === 'adding'}
+                  className={`flex-1 py-3.5 px-6 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    isOutOfStock
+                      ? 'bg-slate-700 opacity-40 cursor-not-allowed'
+                      : itemLoaders[id] === 'adding'
+                      ? 'bg-indigo-900/70 border border-indigo-700/50 cursor-wait'
+                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-indigo-600/30 hover:shadow-indigo-600/50'
+                  }`}
                   id="add-to-cart-btn"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                  {isOutOfStock ? 'Currently Unavailable' : 'Add to Cart'}
+                  {itemLoaders[id] === 'adding' ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span>Adding...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      <span>
+                        {isOutOfStock
+                          ? 'Currently Unavailable'
+                          : getItemQuantity(id) > 0
+                          ? `Add Another (${getItemQuantity(id)} in cart)`
+                          : 'Add to Cart'}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {/* Wishlist Button */}
+                <button
+                  onClick={handleWishlistToggle}
+                  disabled={wishlistLoading}
+                  type="button"
+                  className={`py-3.5 px-5 rounded-xl font-bold text-sm transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg ${
+                    isWishlisted
+                      ? 'bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 shadow-rose-950/40'
+                      : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white'
+                  } ${wishlistLoading ? 'opacity-60 cursor-wait' : ''}`}
+                  id="details-wishlist-btn"
+                >
+                  {wishlistLoading ? (
+                    <>
+                      <span className="animate-spin text-sm">⏳</span>
+                      <span>Saving...</span>
+                    </>
+                  ) : isWishlisted ? (
+                    <>
+                      <span className="text-rose-400">♥</span>
+                      <span>Saved in Wishlist</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>♡</span>
+                      <span>Add to Wishlist</span>
+                    </>
+                  )}
                 </button>
               </div>
+
+              {wishlistFeedback && (
+                <div className="p-3 rounded-xl bg-slate-950/90 border border-indigo-500/40 text-indigo-300 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+                  <span>ℹ️</span>
+                  <span>{wishlistFeedback}</span>
+                </div>
+              )}
 
               {/* Back to Products Link */}
               <div className="pt-2 text-center">

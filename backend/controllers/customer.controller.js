@@ -64,11 +64,17 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    generateTokenAndSetCookie(res, customer._id);
+    const token = generateTokenAndSetCookie(res, customer._id);
 
     res.status(200).json({
       success: true,
       message: 'Login successful',
+      token,
+      customer: {
+        _id: customer._id,
+        fullName: customer.fullName,
+        email: customer.email,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
