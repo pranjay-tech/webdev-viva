@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '', // Uses relative URL proxying (/customers, /products, /wishlist)
+  baseURL: import.meta.env.VITE_API_URL || '', // Uses Render backend URL in prod, or relative proxy in dev
   withCredentials: true, // Crucial for HttpOnly cookies
 });
 
